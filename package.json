@@ -1,0 +1,28 @@
+{
+  "name": "solwatch-backend",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@metaplex-foundation/mpl-bubblegum": "^5.0.2",
+    "@metaplex-foundation/mpl-core": "^1.10.0",
+    "@metaplex-foundation/mpl-token-metadata": "^3.4.0",
+    "@metaplex-foundation/umi": "^1.5.1",
+    "@metaplex-foundation/umi-bundle-defaults": "^1.5.1",
+    "@metaplex-foundation/umi-web3js-adapters": "^1.5.1",
+    "@solana/web3.js": "^1.98.4",
+    "bs58": "^6.0.0",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "firebase-admin": "^14.0.0",
+    "helius-sdk": "^3.0.0",
+    "node-cron": "^4.2.1"
+  }
+}
