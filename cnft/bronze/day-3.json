@@ -2,7 +2,7 @@
   "name": "SolWatch Check-in Day 3 — Bronze",
   "symbol": "SWCI",
   "description": "Day 3 check-in badge for SolWatch. Tier: Bronze. Keep your streak alive.",
-  "image": "https://ochinimus.github.io/solwatch/images/bronze.png",
+  "image": "https://seekdaseek.github.io/solwatch/images/bronze.png",
   "attributes": [
     {
       "trait_type": "Tier",
@@ -20,7 +20,7 @@
   "properties": {
     "files": [
       {
-        "uri": "https://ochinimus.github.io/solwatch/images/bronze.png",
+        "uri": "https://seekdaseek.github.io/solwatch/images/bronze.png",
         "type": "image/png"
       }
     ],

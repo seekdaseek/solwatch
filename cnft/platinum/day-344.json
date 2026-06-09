@@ -2,7 +2,7 @@
   "name": "SolWatch Check-in Day 344 — Platinum",
   "symbol": "SWCI",
   "description": "Day 344 check-in badge for SolWatch. Tier: Platinum. Keep your streak alive.",
-  "image": "https://ochinimus.github.io/solwatch/images/platinum.png",
+  "image": "https://seekdaseek.github.io/solwatch/images/platinum.png",
   "attributes": [
     {
       "trait_type": "Tier",
@@ -20,7 +20,7 @@
   "properties": {
     "files": [
       {
-        "uri": "https://ochinimus.github.io/solwatch/images/platinum.png",
+        "uri": "https://seekdaseek.github.io/solwatch/images/platinum.png",
         "type": "image/png"
       }
     ],
