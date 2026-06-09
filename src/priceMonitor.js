@@ -20,8 +20,13 @@ const TOKEN_NAMES = {
 async function fetchPrices(mints) {
   const ids = [...new Set(mints.map(m => MINT_TO_COINGECKO[m]).filter(Boolean))].join(',');
   if (!ids) return {};
-  const r = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`);
-  const json = await r.json();
+  const r = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`, {
+    headers: { 'Accept': 'application/json' }
+  });
+  if (!r.ok) throw new Error(`CoinGecko HTTP ${r.status}`);
+  const text = await r.text();
+  if (!text || text.trim() === '') throw new Error('CoinGecko empty response');
+  const json = JSON.parse(text);
   const result = {};
   for (const mint of mints) {
     const cgId = MINT_TO_COINGECKO[mint];
