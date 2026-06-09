@@ -1,0 +1,29 @@
+{
+  "name": "SolWatch Check-in Day 63 — Gold",
+  "symbol": "SWCI",
+  "description": "Day 63 check-in badge for SolWatch. Tier: Gold. Keep your streak alive.",
+  "image": "https://ochinimus.github.io/solwatch/images/gold.png",
+  "attributes": [
+    {
+      "trait_type": "Tier",
+      "value": "Gold"
+    },
+    {
+      "trait_type": "Streak Day",
+      "value": 63
+    },
+    {
+      "trait_type": "App",
+      "value": "SolWatch"
+    }
+  ],
+  "properties": {
+    "files": [
+      {
+        "uri": "https://ochinimus.github.io/solwatch/images/gold.png",
+        "type": "image/png"
+      }
+    ],
+    "category": "image"
+  }
+}
