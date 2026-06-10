@@ -2,15 +2,56 @@ const cron = require('node-cron');
 const { getDb } = require('./firebase');
 const { sendPush } = require('./fcm');
 const { createUmi } = require('@metaplex-foundation/umi-bundle-defaults');
-const { mplCore, createV1, pluginAuthorityPair } = require('@metaplex-foundation/mpl-core');
+const { mplCore, createV1, pluginAuthorityPair, create } = require('@metaplex-foundation/mpl-core');
 const { generateSigner, keypairIdentity, publicKey } = require('@metaplex-foundation/umi');
 const { fromWeb3JsKeypair } = require('@metaplex-foundation/umi-web3js-adapters');
 const { Keypair } = require('@solana/web3.js');
-const bs58 = require('bs58');
+const _bs58 = require('bs58'); const bs58 = _bs58.default || _bs58;
 const { mintDailyCheckinCNFT, getTier } = require('./bubblegumService');
 
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const RPC_ENDPOINT = process.env.HELIUS_RPC_URL;
+
+
+const MYTHIC_MILESTONES = {
+  30: { figure: "Hercules", name: "SW Mythic — Hercules" },
+  60: { figure: "Achilles", name: "SW Mythic — Achilles" },
+  90: { figure: "Odysseus", name: "SW Mythic — Odysseus" },
+  120: { figure: "Zeus", name: "SW Mythic — Zeus" },
+  150: { figure: "Poseidon", name: "SW Mythic — Poseidon" },
+  180: { figure: "Ares", name: "SW Mythic — Ares" },
+  210: { figure: "Apollo", name: "SW Mythic — Apollo" },
+  240: { figure: "Athena", name: "SW Mythic — Athena" },
+  270: { figure: "Hades", name: "SW Mythic — Hades" },
+  300: { figure: "Odin", name: "SW Mythic — Odin" },
+  330: { figure: "Thor", name: "SW Mythic — Thor" },
+  365: { figure: "Prometheus", name: "SW Mythic — Prometheus" },
+};
+
+async function mintMythicMilestoneSBT(walletAddress, streakDay) {
+  const milestone = MYTHIC_MILESTONES[streakDay];
+  if (!milestone) return null;
+  const db = getDb();
+  const docId = `${walletAddress}_mythic_${streakDay}`;
+  const ref = db.collection('mythicSBTs').doc(docId);
+  const existing = await ref.get();
+  if (existing.exists) return { alreadyMinted: true };
+  const umi = createUmi(RPC_ENDPOINT).use(mplCore());
+  const treasuryKeypair = Keypair.fromSecretKey(bs58.decode(process.env.TREASURY_PRIVATE_KEY));
+  umi.use(keypairIdentity(fromWeb3JsKeypair(treasuryKeypair)));
+  const assetSigner = generateSigner(umi);
+  const uri = `https://seekdaseek.github.io/solwatch/cnft/mythic/day-${streakDay}.json`;
+  await create(umi, {
+    asset: assetSigner,
+    name: milestone.name.slice(0, 32),
+    uri,
+    owner: publicKey(walletAddress),
+    plugins: [{ type: 'PermanentFreezeDelegate', frozen: true, authority: { type: 'UpdateAuthority' } }],
+  }).sendAndConfirm(umi);
+  await ref.set({ walletAddress, streakDay, figure: milestone.figure, mintedAt: new Date(), uri });
+  console.log(`Mythic SBT minted → ${walletAddress} | ${milestone.figure}`);
+  return { success: true, figure: milestone.figure };
+}
 
 async function handleCheckin(walletAddress, fcmToken) {
   const db = getDb();
@@ -40,7 +81,21 @@ async function handleCheckin(walletAddress, fcmToken) {
   yesterday.setDate(yesterday.getDate() - 1);
   const yesterdayStr = yesterday.toISOString().slice(0, 10);
 
-  data.streak = data.lastCheckin === yesterdayStr ? data.streak + 1 : 1;
+  const missedDay = data.lastCheckin && data.lastCheckin !== yesterdayStr && data.lastCheckin !== todayStr;
+  if (missedDay && data.freezeActive && data.freezeExpiry) {
+    const expiry = data.freezeExpiry.toDate ? data.freezeExpiry.toDate() : new Date(data.freezeExpiry);
+    if (expiry > now) {
+      data.streak = data.streak + 1;
+      data.freezeActive = false;
+      data.freezeExpiry = null;
+    } else {
+      data.streak = 1;
+      data.freezeActive = false;
+      data.freezeExpiry = null;
+    }
+  } else {
+    data.streak = data.lastCheckin === yesterdayStr ? data.streak + 1 : 1;
+  }
   data.lastCheckin = todayStr;
   data.totalCheckins += 1;
   data.monthlyCheckins += 1;
@@ -63,6 +118,23 @@ async function handleCheckin(walletAddress, fcmToken) {
   else if (data.streak === 30)  message = `30-day streak! Gold tier unlocked. SBT incoming...`;
   else if (data.streak === 90)  message = `90 days. Platinum. You're built different.`;
   else if (data.streak === 365) message = `365 days. Diamond. Unmatchable.`;
+
+  if (MYTHIC_MILESTONES[data.streak]) {
+    mintMythicMilestoneSBT(walletAddress, data.streak).catch(e =>
+      console.error('Mythic SBT failed:', e.message)
+    );
+  }
+
+  // Milestone proximity alerts
+  const milestones = [14, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330, 365];
+  for (const m of milestones) {
+    const daysAway = m - data.streak;
+    if (daysAway === 3) {
+      const mTier = data.streak >= 100 ? 'Platinum' : data.streak >= 30 ? 'Gold' : data.streak >= 14 ? 'Silver' : 'Bronze';
+      await sendPush(fcmToken, 'Almost there!', `3 days to day ${m} — keep your streak alive!`, { type: 'milestone_soon', milestone: String(m) });
+      break;
+    }
+  }
 
   if (message) {
     await sendPush(fcmToken, 'SolWatch streak', message, {
@@ -119,7 +191,7 @@ async function mintMonthlyBadges() {
         plugins: [pluginAuthorityPair({
           type: 'PermanentFreezeDelegate',
           data: { frozen: true },
-          authority: { type: 'UpdateAuthority' },
+          authority: { type: 'None' },
         })],
       }).sendAndConfirm(umi);
 
@@ -136,4 +208,4 @@ async function mintMonthlyBadges() {
   }
 }
 
-module.exports = { handleCheckin, scheduleMonthlyMint };
+module.exports = { handleCheckin, scheduleMonthlyMint, mintMythicMilestoneSBT };

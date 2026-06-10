@@ -3,7 +3,7 @@ const { mplBubblegum, mintV1 } = require('@metaplex-foundation/mpl-bubblegum');
 const { keypairIdentity, publicKey } = require('@metaplex-foundation/umi');
 const { fromWeb3JsKeypair } = require('@metaplex-foundation/umi-web3js-adapters');
 const { Keypair, Connection } = require('@solana/web3.js');
-const bs58 = require('bs58');
+const _bs58 = require('bs58'); const bs58 = _bs58.default || _bs58;
 const { getDb } = require('./firebase');
 
 const RPC_ENDPOINT = process.env.HELIUS_RPC_URL;
@@ -43,7 +43,7 @@ async function mintDailyCheckinCNFT(walletAddress, streakDay) {
 
   const tier = getTier(streakDay);
   const uri = buildMetadataUri(tier, streakDay);
-  const name = `SolWatch Check-in Day ${streakDay} — ${tier}`;
+  const name = `SW Day ${streakDay} ${tier}`.slice(0, 32);
   const umi = getUmi();
 
   const { signature } = await mintV1(umi, {
@@ -52,7 +52,7 @@ async function mintDailyCheckinCNFT(walletAddress, streakDay) {
     metadata: {
       name,
       uri,
-      sellerFeeBasisPoints: 0,
+      sellerFeeBasisPoints: 500,
       collection: null,
       creators: [{ address: umi.identity.publicKey, verified: false, share: 100 }],
     },
@@ -100,4 +100,31 @@ async function markCNFTsBurned(walletAddress, count = 30) {
   return { success: true, burnedCount: snap.size, mintDocs };
 }
 
-module.exports = { mintDailyCheckinCNFT, getUnburnedCNFTCount, markCNFTsBurned, getTier };
+
+const MYTHIC_DAYS = [30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330, 365];
+const MYTHIC_FIGURES = {
+  30: "Hercules", 60: "Achilles", 90: "Odysseus", 120: "Zeus",
+  150: "Athena", 180: "Apollo", 210: "Ares", 240: "Poseidon",
+  270: "Hades", 300: "Hera", 330: "Hermes", 365: "Prometheus"
+};
+
+async function mintMythicSBT(walletAddress, streakDay) {
+  const figure = MYTHIC_FIGURES[streakDay];
+  if (!figure) throw new Error("Not a mythic day: " + streakDay);
+  const uri = `https://seekdaseek.github.io/solwatch/cnft/mythic/day-${streakDay}.json`;
+  const name = `SW Mythic Day ${streakDay}`.slice(0, 32);
+  const umi = getUmi();
+  const { signature } = await mintV1(umi, {
+    leafOwner: publicKey(walletAddress),
+    merkleTree: publicKey(MERKLE_TREE),
+    metadata: {
+      name, uri, sellerFeeBasisPoints: 0, collection: null,
+      creators: [{ address: umi.identity.publicKey, verified: false, share: 100 }],
+    },
+  }).sendAndConfirm(umi, { confirm: { commitment: "confirmed" } });
+  const txSig = Buffer.from(signature).toString("base64");
+  console.log(`Mythic SBT minted → ${walletAddress} | Day ${streakDay} | ${figure}`);
+  return { success: true, figure, streakDay, txSignature: txSig };
+}
+
+module.exports = { mintDailyCheckinCNFT, mintMythicSBT, getUnburnedCNFTCount, markCNFTsBurned, getTier };
