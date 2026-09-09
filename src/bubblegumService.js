@@ -6,6 +6,13 @@ const { Keypair, Connection } = require('@solana/web3.js');
 const _bs58 = require('bs58'); const bs58 = _bs58.default || _bs58;
 const { getDb } = require('./firebase');
 
+function truncBytes(s, max = 32) {
+  let out = s;
+  while (Buffer.byteLength(out, 'utf8') > max) out = out.slice(0, -1);
+  return out;
+}
+
+
 const RPC_ENDPOINT = process.env.HELIUS_RPC_URL;
 const MERKLE_TREE = process.env.MERKLE_TREE_ADDRESS;
 const METADATA_BASE_URL = process.env.METADATA_BASE_URL;
@@ -24,7 +31,7 @@ function buildMetadataUri(tier, streakDay) {
 
 function getUmi() {
   const umi = createUmi(RPC_ENDPOINT).use(mplBubblegum());
-  const treasuryKeypair = Keypair.fromSecretKey(bs58.decode(process.env.TREASURY_PRIVATE_KEY));
+  const treasuryKeypair = Keypair.fromSecretKey(bs58.decode((process.env.MINT_PAYER_PRIVATE_KEY || process.env.TREASURY_PRIVATE_KEY).trim()));
   umi.use(keypairIdentity(fromWeb3JsKeypair(treasuryKeypair)));
   return umi;
 }
@@ -43,7 +50,7 @@ async function mintDailyCheckinCNFT(walletAddress, streakDay) {
 
   const tier = getTier(streakDay);
   const uri = buildMetadataUri(tier, streakDay);
-  const name = `SW Day ${streakDay} ${tier}`.slice(0, 32);
+  const name = truncBytes(`SW Day ${streakDay} ${tier}`);
   const umi = getUmi();
 
   const { signature } = await mintV1(umi, {
@@ -112,7 +119,7 @@ async function mintMythicSBT(walletAddress, streakDay) {
   const figure = MYTHIC_FIGURES[streakDay];
   if (!figure) throw new Error("Not a mythic day: " + streakDay);
   const uri = `https://seekdaseek.github.io/solwatch/cnft/mythic/day-${streakDay}.json`;
-  const name = `SW Mythic Day ${streakDay}`.slice(0, 32);
+  const name = truncBytes(`SW Mythic Day ${streakDay}`);
   const umi = getUmi();
   const { signature } = await mintV1(umi, {
     leafOwner: publicKey(walletAddress),

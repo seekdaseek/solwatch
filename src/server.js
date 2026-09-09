@@ -149,6 +149,29 @@ app.get("/stats", async (req, res) => {
   }
 });
 
+// Badges actually OWNED, for the client grid. Read-only, same shape and auth
+// model as /stats. `burned` is excluded so the count can never disagree with
+// getUnburnedCNFTCount(), which is what gates burn-for-Pro. days[] is returned
+// as well as count so a richer grid needs no second backend change.
+app.get("/badges", async (req, res) => {
+  try {
+    const { walletAddress } = req.query;
+    if (!walletAddress) return res.status(400).json({ error: "missing walletAddress" });
+    const db = require("./firebase").getDb();
+    const snap = await db.collection("cnftMints")
+      .where("walletAddress", "==", walletAddress)
+      .where("burned", "==", false)
+      .get();
+    const days = snap.docs
+      .map(d => d.data().streakDay)
+      .filter(Number.isFinite)
+      .sort((a, b) => a - b);
+    res.json({ walletAddress, count: days.length, days });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get("/alerts", async (req, res) => {
   try {
     const { walletAddress } = req.query;
@@ -284,7 +307,7 @@ app.post("/genesis/mint", async (req, res) => {
     const { Keypair } = require("@solana/web3.js");
     const _bs58 = require("bs58"); const bs58 = _bs58.default || _bs58;
     const umi = createUmi(process.env.HELIUS_RPC_URL).use(mplCore());
-    const keypair = Keypair.fromSecretKey(bs58.decode(process.env.TREASURY_PRIVATE_KEY));
+    const keypair = Keypair.fromSecretKey(bs58.decode((process.env.MINT_PAYER_PRIVATE_KEY || process.env.TREASURY_PRIVATE_KEY).trim()));
     umi.use(keypairIdentity(fromWeb3JsKeypair(keypair)));
     const assetSigner = generateSigner(umi);
     const uri = `https://seekdaseek.github.io/solwatch/cnft/genesis/${number}.json`;
@@ -293,6 +316,7 @@ app.post("/genesis/mint", async (req, res) => {
       name: `SolWatch Genesis #${number}`.slice(0, 32),
       uri,
       owner: publicKey(walletAddress),
+    updateAuthority: publicKey(process.env.TREASURY_WALLET),
       plugins: [{ type: 'PermanentFreezeDelegate', frozen: false, authority: { type: 'UpdateAuthority' } }],
     }).sendAndConfirm(umi);
     
@@ -324,7 +348,7 @@ app.post("/admin/mint-founder", async (req, res) => {
     const { Keypair } = require("@solana/web3.js");
     const _bs58 = require("bs58"); const bs58 = _bs58.default || _bs58;
     const umi = createUmi(process.env.HELIUS_RPC_URL).use(mplCore());
-    const keypair = Keypair.fromSecretKey(bs58.decode(process.env.TREASURY_PRIVATE_KEY));
+    const keypair = Keypair.fromSecretKey(bs58.decode((process.env.MINT_PAYER_PRIVATE_KEY || process.env.TREASURY_PRIVATE_KEY).trim()));
     umi.use(keypairIdentity(fromWeb3JsKeypair(keypair)));
     const assetSigner = generateSigner(umi);
     const uri = "https://seekdaseek.github.io/solwatch/cnft/genesis/0.json";
@@ -333,6 +357,7 @@ app.post("/admin/mint-founder", async (req, res) => {
       name: "SolWatch Genesis #0 Founder",
       uri,
       owner: publicKey(walletAddress),
+    updateAuthority: publicKey(process.env.TREASURY_WALLET),
       plugins: [{ type: 'PermanentFreezeDelegate', frozen: false, authority: { type: 'UpdateAuthority' } }],
     }).sendAndConfirm(umi);
     await db.collection("genesisMints").add({ walletAddress, number: 0, founder: true, mintedAt: new Date() });
@@ -387,7 +412,7 @@ cron.schedule('0 9 * * 1', async () => {
     const { Keypair } = require('@solana/web3.js');
     const _bs58 = require('bs58'); const bs58 = _bs58.default || _bs58;
     const umi = createUmi(process.env.HELIUS_RPC_URL).use(mplCore());
-    const keypair = Keypair.fromSecretKey(bs58.decode(process.env.TREASURY_PRIVATE_KEY));
+    const keypair = Keypair.fromSecretKey(bs58.decode((process.env.MINT_PAYER_PRIVATE_KEY || process.env.TREASURY_PRIVATE_KEY).trim()));
     umi.use(keypairIdentity(fromWeb3JsKeypair(keypair)));
     const crowns = ['gold_crown', 'silver_crown', 'bronze_crown'];
     const ranks = ['Champion', 'Challenger', 'Contender'];
@@ -405,6 +430,7 @@ cron.schedule('0 9 * * 1', async () => {
           name: `SolWatch ${rank} ${week}`.slice(0, 32),
           uri,
           owner: publicKey(walletAddress),
+    updateAuthority: publicKey(process.env.TREASURY_WALLET),
           plugins: [{ type: 'PermanentFreezeDelegate', frozen: false, authority: { type: 'UpdateAuthority' } }],
         }).sendAndConfirm(umi);
         if (user.fcmToken) await sendPush(user.fcmToken, 'Weekly Crown!', `You ranked #${i+1} this week and earned the ${rank} Crown!`, { type: 'reward', rank: String(i+1) });

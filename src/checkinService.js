@@ -9,6 +9,13 @@ const { Keypair } = require('@solana/web3.js');
 const _bs58 = require('bs58'); const bs58 = _bs58.default || _bs58;
 const { mintDailyCheckinCNFT, getTier } = require('./bubblegumService');
 
+function truncBytes(s, max = 32) {
+  let out = s;
+  while (Buffer.byteLength(out, 'utf8') > max) out = out.slice(0, -1);
+  return out;
+}
+
+
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const RPC_ENDPOINT = process.env.HELIUS_RPC_URL;
 
@@ -37,15 +44,16 @@ async function mintMythicMilestoneSBT(walletAddress, streakDay) {
   const existing = await ref.get();
   if (existing.exists) return { alreadyMinted: true };
   const umi = createUmi(RPC_ENDPOINT).use(mplCore());
-  const treasuryKeypair = Keypair.fromSecretKey(bs58.decode(process.env.TREASURY_PRIVATE_KEY));
+  const treasuryKeypair = Keypair.fromSecretKey(bs58.decode((process.env.MINT_PAYER_PRIVATE_KEY || process.env.TREASURY_PRIVATE_KEY).trim()));
   umi.use(keypairIdentity(fromWeb3JsKeypair(treasuryKeypair)));
   const assetSigner = generateSigner(umi);
   const uri = `https://seekdaseek.github.io/solwatch/cnft/mythic/day-${streakDay}.json`;
   await create(umi, {
     asset: assetSigner,
-    name: milestone.name.slice(0, 32),
+    name: truncBytes(milestone.name),
     uri,
     owner: publicKey(walletAddress),
+    updateAuthority: publicKey(process.env.TREASURY_WALLET),
     plugins: [{ type: 'PermanentFreezeDelegate', frozen: true, authority: { type: 'UpdateAuthority' } }],
   }).sendAndConfirm(umi);
   await ref.set({ walletAddress, streakDay, figure: milestone.figure, mintedAt: new Date(), uri });
@@ -174,7 +182,7 @@ async function mintMonthlyBadges() {
   console.log(`Minting SBTs for ${snap.size} users...`);
 
   const umi = createUmi(RPC_ENDPOINT).use(mplCore());
-  const treasuryKeypair = Keypair.fromSecretKey(bs58.decode(process.env.TREASURY_PRIVATE_KEY));
+  const treasuryKeypair = Keypair.fromSecretKey(bs58.decode((process.env.MINT_PAYER_PRIVATE_KEY || process.env.TREASURY_PRIVATE_KEY).trim()));
   umi.use(keypairIdentity(fromWeb3JsKeypair(treasuryKeypair)));
 
   for (const doc of snap.docs) {
@@ -185,9 +193,10 @@ async function mintMonthlyBadges() {
       const uri = `${process.env.METADATA_BASE_URL}/${monthKey}.json`;
       await createV1(umi, {
         asset: assetSigner,
-        name: `SolWatch ${MONTH_NAMES[lastMonth]} ${lastMonthYear}`,
+        name: truncBytes(`SolWatch ${MONTH_NAMES[lastMonth]} ${lastMonthYear}`),
         uri,
         owner: publicKey(user.walletAddress),
+    updateAuthority: publicKey(process.env.TREASURY_WALLET),
         plugins: [pluginAuthorityPair({
           type: 'PermanentFreezeDelegate',
           data: { frozen: true },

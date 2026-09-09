@@ -20,7 +20,7 @@ async function sendPush(fcmToken, title, body, data = {}) {
       e.code === 'messaging/invalid-registration-token'
     ) {
       console.warn(`Stale FCM token: ${fcmToken.slice(0, 16)}...`);
-      return null;
+      return 'STALE';
     }
     throw e;
   }
