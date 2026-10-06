@@ -16,27 +16,59 @@
 // waiting for any confirmation, and finality takes ~13 s or more. So the payment is polled for up to
 // FINALIZED_WAIT_MS; a request that times out is told to retry with the same signature, which still works
 // because nothing is claimed until the payment verifies.
+//
+// AND IT IS CAPPED (2026-10-06), because each waiting request holds a connection and calls the RPC:
+//   - before any polling: the signature format is checked and a signature already in genesisPayments is
+//     refused (409) without touching the chain;
+//   - at most PENDING_MAX verifications wait at once, and one per wallet (429 beyond either);
+//   - polling backs off: POLL_DELAYS_MS gives 10 calls inside the 60 s (was 30, one every 2 s), still early
+//     enough to catch a payment at ~13-16 s;
+//   - server.js puts a per-IP limit (src/rateLimit.js) in front of the route.
 'use strict';
 
 const GENESIS_PRICE_SOL = 0.1;
 const GENESIS_LAMPORTS = 100_000_000;
 const GENESIS_MAX = 100;
 const FINALIZED_WAIT_MS = 60_000;
+const POLL_DELAYS_MS = [1500, 2000, 3000, 4000, 5000, 6000, 8000, 10000, 12000];   // calls at 0,1.5,3.5,6.5,10.5,15.5,21.5,29.5,39.5,51.5 s
+const PENDING_MAX = 5, PENDING_PER_WALLET = 1;
 const PAYMENTS = 'genesisPayments';
 
 const BASE58 = /^[1-9A-HJ-NP-Za-km-z]+$/;
 const looksLikePubkey = s => typeof s === 'string' && s.length >= 32 && s.length <= 44 && BASE58.test(s);
 const looksLikeSignature = s => typeof s === 'string' && s.length >= 64 && s.length <= 88 && BASE58.test(s);
 
-async function findFinalized(conn, signature, { waitMs = FINALIZED_WAIT_MS, everyMs = 2000, sleep = ms => new Promise(r => setTimeout(r, ms)) } = {}) {
-  const end = Date.now() + waitMs;
-  for (;;) {
+async function findFinalized(conn, signature, { waitMs = FINALIZED_WAIT_MS, delays = POLL_DELAYS_MS, sleep = ms => new Promise(r => setTimeout(r, ms)), now = () => Date.now() } = {}) {
+  const end = now() + waitMs;
+  for (let i = 0; ; i++) {
     const tx = await conn.getParsedTransaction(signature, { commitment: 'finalized', maxSupportedTransactionVersion: 0 });
     if (tx) return tx;
-    if (Date.now() >= end) return null;
-    await sleep(everyMs);
+    const next = delays[Math.min(i, delays.length - 1)];
+    if (i >= delays.length || now() + next > end) return null;
+    await sleep(next);
   }
 }
+
+// Verifications in flight, globally and per wallet. One process, in memory.
+function makePending({ max = PENDING_MAX, perWallet = PENDING_PER_WALLET } = {}) {
+  const byWallet = new Map();
+  let total = 0;
+  return {
+    acquire(wallet) {
+      if (total >= max) return { ok: false, error: `Too many payment verifications in progress (${max}); retry in a few seconds.` };
+      if ((byWallet.get(wallet) || 0) >= perWallet) return { ok: false, error: 'A payment verification for this wallet is already in progress.' };
+      total++; byWallet.set(wallet, (byWallet.get(wallet) || 0) + 1);
+      return { ok: true };
+    },
+    release(wallet) {
+      total = Math.max(0, total - 1);
+      const n = (byWallet.get(wallet) || 1) - 1;
+      if (n > 0) byWallet.set(wallet, n); else byWallet.delete(wallet);
+    },
+    get size() { return total; },
+  };
+}
+const pendingDefault = makePending();
 
 // tx: a getParsedTransaction result. Pure: every rule above except finality and reuse.
 function checkPayment(tx, { walletAddress, treasury, minLamports = GENESIS_LAMPORTS }) {
@@ -73,6 +105,10 @@ async function genesisMint({ walletAddress, txSignature } = {}, deps) {
   if (!walletAddress || !txSignature) return { status: 400, body: { error: 'missing fields' } };
   if (!looksLikePubkey(walletAddress) || !looksLikeSignature(txSignature)) return { status: 400, body: { error: 'malformed walletAddress or txSignature' } };
   const db = deps.getDb();
+  // A signature already claimed is refused before anything else, and without any RPC call.
+  if ((await db.collection(PAYMENTS).doc(txSignature).get()).exists) {
+    return { status: 409, body: { error: 'This payment signature has already been used' } };
+  }
 
   // Supply. A paid Genesis waiting in owedRewards holds its place in the 100.
   const snap = await db.collection('genesisMints').get();
@@ -92,7 +128,12 @@ async function genesisMint({ walletAddress, txSignature } = {}, deps) {
     return { status: 409, body: { error: 'This payment signature has already been used' } };
   }
 
-  const tx = await findFinalized(deps.conn, txSignature, deps.wait || {});
+  const pending = deps.pending || pendingDefault;
+  const slot = pending.acquire(walletAddress);
+  if (!slot.ok) return { status: 429, body: { error: slot.error } };
+  let tx;
+  try { tx = await findFinalized(deps.conn, txSignature, deps.wait || {}); }
+  finally { pending.release(walletAddress); }
   if (!tx) return { status: 400, body: { error: 'Payment not found at finalized commitment yet. Retry in a minute with the same signature.' } };
   const chk = checkPayment(tx, { walletAddress, treasury: deps.treasury, minLamports: GENESIS_LAMPORTS });
   if (!chk.ok) return { status: chk.status, body: { error: chk.error } };
@@ -109,4 +150,4 @@ async function genesisMint({ walletAddress, txSignature } = {}, deps) {
   return { status: 200, body: { success: true, number, remaining: GENESIS_MAX - number } };
 }
 
-module.exports = { genesisMint, checkPayment, claimSignature, findFinalized, GENESIS_PRICE_SOL, GENESIS_LAMPORTS, GENESIS_MAX };
+module.exports = { genesisMint, checkPayment, claimSignature, findFinalized, makePending, POLL_DELAYS_MS, PENDING_MAX, GENESIS_PRICE_SOL, GENESIS_LAMPORTS, GENESIS_MAX };

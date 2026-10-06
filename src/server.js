@@ -7,8 +7,14 @@ const whaleHandler = require('./whaleHandler');
 const { rewards, scheduleOwedRetry } = require('./coreRewards');
 const { statsView } = require('./statsView');
 const { genesisMint, GENESIS_PRICE_SOL, GENESIS_MAX } = require('./genesisPayment');
+const { makeRateLimiter } = require('./rateLimit');
+// 6 POSTs per 10 minutes per client IP: a buyer needs one, or two if the first answer is "retry".
+const genesisLimit = makeRateLimiter({ windowMs: 10 * 60_000, max: 6 });
 
 const app = express();
+// req.ip = the client nginx saw (X-Forwarded-For), trusted only when the peer is loopback, i.e. nginx itself;
+// a direct connection keeps its socket address. Needed by the /genesis/mint per-IP limit.
+app.set('trust proxy', 'loopback');
 app.use(express.json());
 
 // ─── Webhooks ────────────────────────────────────────────────────────────────
@@ -271,7 +277,7 @@ app.delete("/alerts/:id", async (req, res) => {
 
 // Payment verified on chain (finalized, signed by the caller, caller -> TREASURY_WALLET >= price, signature
 // never used before: 409) before anything is minted. src/genesisPayment.js holds the rules and their reasons.
-app.post("/genesis/mint", async (req, res) => {
+app.post("/genesis/mint", genesisLimit.middleware, async (req, res) => {
   try {
     const { Connection } = require("@solana/web3.js");
     const { status, body } = await genesisMint(req.body || {}, {
