@@ -15,6 +15,11 @@ function fakeDb() {
       id,
       async get() { return snap(name, id); },
       async set(data, opts) { col(name).set(id, opts && opts.merge ? { ...(col(name).get(id) || {}), ...data } : { ...data }); },
+      // Firestore create(): fails when the document exists, with gRPC code 6 ALREADY_EXISTS.
+      async create(data) {
+        if (col(name).has(id)) { const e = new Error(`6 ALREADY_EXISTS: Document already exists: ${name}/${id}`); e.code = 6; throw e; }
+        col(name).set(id, { ...data });
+      },
       async update(data) {
         if (!col(name).has(id)) throw new Error(`NOT_FOUND: ${name}/${id}`);
         col(name).set(id, { ...col(name).get(id), ...data });

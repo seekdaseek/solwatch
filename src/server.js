@@ -5,6 +5,8 @@ const { startPriceMonitor } = require('./priceMonitor');
 const { scheduleMonthlyMint } = require('./checkinService');
 const whaleHandler = require('./whaleHandler');
 const { rewards, scheduleOwedRetry } = require('./coreRewards');
+const { statsView } = require('./statsView');
+const { genesisMint, GENESIS_PRICE_SOL, GENESIS_MAX } = require('./genesisPayment');
 
 const app = express();
 app.use(express.json());
@@ -143,8 +145,8 @@ app.get("/stats", async (req, res) => {
     if (!walletAddress) return res.status(400).json({ error: "missing walletAddress" });
     const db = require("./firebase").getDb();
     const snap = await db.collection("checkins").doc(walletAddress).get();
-    if (!snap.exists) return res.json({ streak: 0, tier: "Bronze", monthlyCheckins: 0, totalCheckins: 0 });
-    res.json(snap.data());
+    // Only the fields the app reads (src/statsView.js); never the stored fcmToken.
+    res.json(statsView(snap.exists ? snap.data() : null));
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -267,47 +269,18 @@ app.delete("/alerts/:id", async (req, res) => {
 });
 
 
-const GENESIS_PRICE = 0.1;
-const GENESIS_MAX = 100;
-
+// Payment verified on chain (finalized, signed by the caller, caller -> TREASURY_WALLET >= price, signature
+// never used before: 409) before anything is minted. src/genesisPayment.js holds the rules and their reasons.
 app.post("/genesis/mint", async (req, res) => {
   try {
-    const { walletAddress, txSignature } = req.body;
-    if (!walletAddress || !txSignature) return res.status(400).json({ error: "missing fields" });
-    const db = require("./firebase").getDb();
-    
-    // Check supply. A paid Genesis waiting in owedRewards holds its place in the 100.
-    const snap = await db.collection("genesisMints").get();
-    const owedGenesis = (await db.collection("owedRewards").where("status", "==", "owed").get()).docs
-      .map(d => ({ id: d.id, ...d.data() })).filter(o => o.type === "genesis");
-    if (snap.size + owedGenesis.length >= GENESIS_MAX) return res.status(400).json({ error: "Genesis sold out!" });
-    
-    // Check not already minted (or already paid for and queued)
-    const existing = await db.collection("genesisMints").where("walletAddress", "==", walletAddress).get();
-    if (!existing.empty) return res.status(400).json({ error: "Already minted Genesis badge" });
-    if (owedGenesis.some(o => o.walletAddress === walletAddress || o.paymentTx === txSignature))
-      return res.status(202).json({ success: false, queued: true, message: "Your Genesis badge is already queued and will be minted automatically." });
-    
-    // Verify payment on-chain
-    const { Connection, PublicKey } = require("@solana/web3.js");
-    const conn = new Connection(process.env.HELIUS_RPC_URL, "confirmed");
-    const tx = await conn.getTransaction(txSignature, { commitment: "confirmed", maxSupportedTransactionVersion: 0 });
-    if (!tx) return res.status(400).json({ error: "Transaction not found" });
-    const accountKeys = tx.transaction.message.getAccountKeys ? tx.transaction.message.getAccountKeys().staticAccountKeys : tx.transaction.message.accountKeys;
-    const treasuryPubkey = new PublicKey(process.env.TREASURY_WALLET);
-    const treasuryIdx = accountKeys.findIndex(k => k.equals(treasuryPubkey));
-    if (treasuryIdx === -1) return res.status(400).json({ error: "Payment not sent to treasury" });
-    const received = tx.meta.postBalances[treasuryIdx] - tx.meta.preBalances[treasuryIdx];
-    const minLamports = GENESIS_PRICE * 1e9 * 0.99;
-    if (received < minLamports) return res.status(400).json({ error: "Insufficient payment" });
-    
-    // Mint the Core NFT through coreRewards: number = genesisMints count + 1 when it lands, the
-    // genesisMints record is written there. A payer that cannot cover the create queues it instead of
-    // failing a paid request.
-    const r = await rewards().mintReward({ type: "genesis", walletAddress, paymentTx: txSignature });
-    if (r.owed) return res.status(202).json({ success: false, queued: true, message: "Payment received. Your Genesis badge is queued and will be minted automatically." });
-    const number = r.number ?? (await db.collection("genesisMints").where("txSignature", "==", txSignature).get()).docs.map(d => d.data().number)[0];
-    res.json({ success: true, number, remaining: GENESIS_MAX - number });
+    const { Connection } = require("@solana/web3.js");
+    const { status, body } = await genesisMint(req.body || {}, {
+      getDb: () => require("./firebase").getDb(),
+      conn: new Connection(process.env.HELIUS_RPC_URL, "finalized"),
+      treasury: process.env.TREASURY_WALLET,
+      mintReward: item => rewards().mintReward(item),
+    });
+    res.status(status).json(body);
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -315,7 +288,7 @@ app.get("/genesis/status", async (req, res) => {
   try {
     const db = require("./firebase").getDb();
     const snap = await db.collection("genesisMints").get();
-    res.json({ minted: snap.size, remaining: GENESIS_MAX - snap.size, price: GENESIS_PRICE, soldOut: snap.size >= GENESIS_MAX });
+    res.json({ minted: snap.size, remaining: GENESIS_MAX - snap.size, price: GENESIS_PRICE_SOL, soldOut: snap.size >= GENESIS_MAX });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
