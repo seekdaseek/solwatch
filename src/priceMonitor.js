@@ -135,11 +135,18 @@ async function fetchPrices(mints) {
   // so these run together and each carries its own failure. One mint failing
   // must not blank the rest - the Pyth version also returned a partial map, and
   // the caller already skips a mint that is absent.
+  //
+  // A Jupiter failure is NOT logged here any more. It is only an error if no
+  // other source can price the mint either; when DexScreener answers it is one
+  // stdout info line. Before 2026-10-06 each Jupiter 502 wrote a stderr line
+  // even when the fallback served the price, and those lines alone tripped the
+  // watchdog's "solwatch: N new error lines".
+  const jupErr = {};
   const settled = await Promise.all(wanted.map(async (mint) => {
     try {
       return [mint, await fetchOne(mint)];
     } catch (e) {
-      console.error(`Price fetch failed for ${TOKEN_NAMES[mint] || mint}: ${e.message}`);
+      jupErr[mint] = e.message;
       return [mint, null];
     }
   }));
@@ -150,15 +157,21 @@ async function fetchPrices(mints) {
   // Only ask the second source about what Jupiter could not price, so a healthy
   // poll makes exactly one upstream call per mint and nothing extra.
   const missing = wanted.filter((m) => result[m] === undefined);
+  const why = (m) => `jupiter ${jupErr[m] || 'no usable quote'}`;
+  let dsErr = null;
   if (missing.length) {
     try {
       const ds = await dexscreenerPrices(missing);
-      for (const [mint, price] of Object.entries(ds)) {
-        console.warn(`[price] ${TOKEN_NAMES[mint] || mint} served by dexscreener at ${price} (jupiter did not answer)`);
-        result[mint] = price;
+      const served = Object.entries(ds);
+      for (const [mint, price] of served) result[mint] = price;
+      // ONE stdout line per poll for everything the fallback served (console.log
+      // is stdout; console.warn would be stderr).
+      if (served.length) {
+        console.log(`[price] served by dexscreener: ` +
+          served.map(([m, p]) => `${TOKEN_NAMES[m] || m} ${p} (${why(m)})`).join(', '));
       }
     } catch (e) {
-      console.error(`Price fetch failed (dexscreener fallback): ${e.message}`);
+      dsErr = e.message;
     }
   }
 
@@ -168,10 +181,12 @@ async function fetchPrices(mints) {
   // produced ZERO evidence. The Pyth outage was only caught because it wrote
   // 2645 error lines. Successes are deliberately not logged - at a 30s poll
   // over four mints that would be ~11,500 lines a day and would bury this.
+  // This is the one stderr line: every source failed for these mints, and it
+  // carries each source's reason.
   const dropped = wanted.filter((m) => result[m] === undefined);
   if (dropped.length) {
-    console.warn(`[price] DROPPED ${dropped.length}/${wanted.length} mint(s), no source could price: ` +
-      dropped.map((m) => `${TOKEN_NAMES[m] || m} (${m})`).join(', '));
+    console.error(`[price] DROPPED ${dropped.length}/${wanted.length} mint(s), no source could price: ` +
+      dropped.map((m) => `${TOKEN_NAMES[m] || m} (${why(m)}; dexscreener ${dsErr || 'no usable pair'})`).join(', '));
   }
 
   return result;

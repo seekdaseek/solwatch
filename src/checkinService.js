@@ -1,64 +1,16 @@
 const cron = require('node-cron');
 const { getDb } = require('./firebase');
 const { sendPush } = require('./fcm');
-const { createUmi } = require('@metaplex-foundation/umi-bundle-defaults');
-const { mplCore, createV1, pluginAuthorityPair, create } = require('@metaplex-foundation/mpl-core');
-const { generateSigner, keypairIdentity, publicKey } = require('@metaplex-foundation/umi');
-const { fromWeb3JsKeypair } = require('@metaplex-foundation/umi-web3js-adapters');
-const { Keypair } = require('@solana/web3.js');
-const _bs58 = require('bs58'); const bs58 = _bs58.default || _bs58;
 const { mintDailyCheckinCNFT, getTier } = require('./bubblegumService');
+// Every mpl-core reward goes through coreRewards: balance checked before the tx is built, an unaffordable
+// one recorded as owed (owedRewards/<id>) and minted by the hourly retry once the payer covers it.
+const { rewards, MYTHIC_MILESTONES } = require('./coreRewards');
 
-function truncBytes(s, max = 32) {
-  let out = s;
-  while (Buffer.byteLength(out, 'utf8') > max) out = out.slice(0, -1);
-  return out;
-}
-
-
-const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-const RPC_ENDPOINT = process.env.HELIUS_RPC_URL;
-
-
-const MYTHIC_MILESTONES = {
-  30: { figure: "Hercules", name: "SW Mythic — Hercules" },
-  60: { figure: "Achilles", name: "SW Mythic — Achilles" },
-  90: { figure: "Odysseus", name: "SW Mythic — Odysseus" },
-  120: { figure: "Zeus", name: "SW Mythic — Zeus" },
-  150: { figure: "Poseidon", name: "SW Mythic — Poseidon" },
-  180: { figure: "Ares", name: "SW Mythic — Ares" },
-  210: { figure: "Apollo", name: "SW Mythic — Apollo" },
-  240: { figure: "Athena", name: "SW Mythic — Athena" },
-  270: { figure: "Hades", name: "SW Mythic — Hades" },
-  300: { figure: "Odin", name: "SW Mythic — Odin" },
-  330: { figure: "Thor", name: "SW Mythic — Thor" },
-  365: { figure: "Prometheus", name: "SW Mythic — Prometheus" },
-};
-
+// Same doc id (mythicSBTs/<wallet>_mythic_<day>) and record as before; returns { owed: true } instead of a
+// failed transaction when the mint payer cannot cover the create.
 async function mintMythicMilestoneSBT(walletAddress, streakDay) {
-  const milestone = MYTHIC_MILESTONES[streakDay];
-  if (!milestone) return null;
-  const db = getDb();
-  const docId = `${walletAddress}_mythic_${streakDay}`;
-  const ref = db.collection('mythicSBTs').doc(docId);
-  const existing = await ref.get();
-  if (existing.exists) return { alreadyMinted: true };
-  const umi = createUmi(RPC_ENDPOINT).use(mplCore());
-  const treasuryKeypair = Keypair.fromSecretKey(bs58.decode((process.env.MINT_PAYER_PRIVATE_KEY || process.env.TREASURY_PRIVATE_KEY).trim()));
-  umi.use(keypairIdentity(fromWeb3JsKeypair(treasuryKeypair)));
-  const assetSigner = generateSigner(umi);
-  const uri = `https://seekdaseek.github.io/solwatch/cnft/mythic/day-${streakDay}.json`;
-  await create(umi, {
-    asset: assetSigner,
-    name: truncBytes(milestone.name),
-    uri,
-    owner: publicKey(walletAddress),
-    updateAuthority: publicKey(process.env.TREASURY_WALLET),
-    plugins: [{ type: 'PermanentFreezeDelegate', frozen: true, authority: { type: 'UpdateAuthority' } }],
-  }).sendAndConfirm(umi);
-  await ref.set({ walletAddress, streakDay, figure: milestone.figure, mintedAt: new Date(), uri });
-  console.log(`Mythic SBT minted → ${walletAddress} | ${milestone.figure}`);
-  return { success: true, figure: milestone.figure };
+  if (!MYTHIC_MILESTONES[streakDay]) return null;
+  return rewards().mintReward({ type: 'mythic', walletAddress, milestone: streakDay });
 }
 
 async function handleCheckin(walletAddress, fcmToken) {
@@ -181,36 +133,14 @@ async function mintMonthlyBadges() {
   if (snap.empty) { console.log('No 30-day completions last month'); return; }
   console.log(`Minting SBTs for ${snap.size} users...`);
 
-  const umi = createUmi(RPC_ENDPOINT).use(mplCore());
-  const treasuryKeypair = Keypair.fromSecretKey(bs58.decode((process.env.MINT_PAYER_PRIVATE_KEY || process.env.TREASURY_PRIVATE_KEY).trim()));
-  umi.use(keypairIdentity(fromWeb3JsKeypair(treasuryKeypair)));
-
+  // mintedMonths update and the push happen inside coreRewards once the mint lands (now, or from the owed
+  // queue later). The old createV1 + pluginAuthorityPair call failed on every run with "Invalid data enum
+  // variant ... got undefined" (2026-10-01, 3pxVa...); coreRewards builds the V2 plugin format instead.
   for (const doc of snap.docs) {
     const user = doc.data();
     if (user.mintedMonths?.includes(monthKey)) continue;
     try {
-      const assetSigner = generateSigner(umi);
-      const uri = `${process.env.METADATA_BASE_URL}/${monthKey}.json`;
-      await createV1(umi, {
-        asset: assetSigner,
-        name: truncBytes(`SolWatch ${MONTH_NAMES[lastMonth]} ${lastMonthYear}`),
-        uri,
-        owner: publicKey(user.walletAddress),
-    updateAuthority: publicKey(process.env.TREASURY_WALLET),
-        plugins: [pluginAuthorityPair({
-          type: 'PermanentFreezeDelegate',
-          data: { frozen: true },
-          authority: { type: 'None' },
-        })],
-      }).sendAndConfirm(umi);
-
-      await doc.ref.update({ mintedMonths: [...(user.mintedMonths || []), monthKey] });
-
-      if (user.fcmToken) await sendPush(user.fcmToken, 'SolWatch badge minted!',
-        `Your ${MONTH_NAMES[lastMonth]} ${lastMonthYear} SBT just landed in your wallet.`,
-        { type: 'sbt', monthKey }
-      );
-      console.log(`SBT minted → ${user.walletAddress}`);
+      await rewards().mintReward({ type: 'monthly', walletAddress: user.walletAddress, monthKey });
     } catch (e) {
       console.error(`SBT mint failed for ${user.walletAddress}:`, e.message);
     }

@@ -4,6 +4,7 @@ const { initFirebase } = require('./firebase');
 const { startPriceMonitor } = require('./priceMonitor');
 const { scheduleMonthlyMint } = require('./checkinService');
 const whaleHandler = require('./whaleHandler');
+const { rewards, scheduleOwedRetry } = require('./coreRewards');
 
 const app = express();
 app.use(express.json());
@@ -275,13 +276,17 @@ app.post("/genesis/mint", async (req, res) => {
     if (!walletAddress || !txSignature) return res.status(400).json({ error: "missing fields" });
     const db = require("./firebase").getDb();
     
-    // Check supply
+    // Check supply. A paid Genesis waiting in owedRewards holds its place in the 100.
     const snap = await db.collection("genesisMints").get();
-    if (snap.size >= GENESIS_MAX) return res.status(400).json({ error: "Genesis sold out!" });
+    const owedGenesis = (await db.collection("owedRewards").where("status", "==", "owed").get()).docs
+      .map(d => ({ id: d.id, ...d.data() })).filter(o => o.type === "genesis");
+    if (snap.size + owedGenesis.length >= GENESIS_MAX) return res.status(400).json({ error: "Genesis sold out!" });
     
-    // Check not already minted
+    // Check not already minted (or already paid for and queued)
     const existing = await db.collection("genesisMints").where("walletAddress", "==", walletAddress).get();
     if (!existing.empty) return res.status(400).json({ error: "Already minted Genesis badge" });
+    if (owedGenesis.some(o => o.walletAddress === walletAddress || o.paymentTx === txSignature))
+      return res.status(202).json({ success: false, queued: true, message: "Your Genesis badge is already queued and will be minted automatically." });
     
     // Verify payment on-chain
     const { Connection, PublicKey } = require("@solana/web3.js");
@@ -296,31 +301,12 @@ app.post("/genesis/mint", async (req, res) => {
     const minLamports = GENESIS_PRICE * 1e9 * 0.99;
     if (received < minLamports) return res.status(400).json({ error: "Insufficient payment" });
     
-    // Assign number
-    const number = snap.size + 1;
-    
-    // Mint real Core NFT
-    const { mplCore, create } = require("@metaplex-foundation/mpl-core");
-    const { createUmi } = require("@metaplex-foundation/umi-bundle-defaults");
-    const { keypairIdentity, publicKey, generateSigner } = require("@metaplex-foundation/umi");
-    const { fromWeb3JsKeypair } = require("@metaplex-foundation/umi-web3js-adapters");
-    const { Keypair } = require("@solana/web3.js");
-    const _bs58 = require("bs58"); const bs58 = _bs58.default || _bs58;
-    const umi = createUmi(process.env.HELIUS_RPC_URL).use(mplCore());
-    const keypair = Keypair.fromSecretKey(bs58.decode((process.env.MINT_PAYER_PRIVATE_KEY || process.env.TREASURY_PRIVATE_KEY).trim()));
-    umi.use(keypairIdentity(fromWeb3JsKeypair(keypair)));
-    const assetSigner = generateSigner(umi);
-    const uri = `https://seekdaseek.github.io/solwatch/cnft/genesis/${number}.json`;
-    await create(umi, {
-      asset: assetSigner,
-      name: `SolWatch Genesis #${number}`.slice(0, 32),
-      uri,
-      owner: publicKey(walletAddress),
-    updateAuthority: publicKey(process.env.TREASURY_WALLET),
-      plugins: [{ type: 'PermanentFreezeDelegate', frozen: false, authority: { type: 'UpdateAuthority' } }],
-    }).sendAndConfirm(umi);
-    
-    await db.collection("genesisMints").add({ walletAddress, number, txSignature, mintedAt: new Date() });
+    // Mint the Core NFT through coreRewards: number = genesisMints count + 1 when it lands, the
+    // genesisMints record is written there. A payer that cannot cover the create queues it instead of
+    // failing a paid request.
+    const r = await rewards().mintReward({ type: "genesis", walletAddress, paymentTx: txSignature });
+    if (r.owed) return res.status(202).json({ success: false, queued: true, message: "Payment received. Your Genesis badge is queued and will be minted automatically." });
+    const number = r.number ?? (await db.collection("genesisMints").where("txSignature", "==", txSignature).get()).docs.map(d => d.data().number)[0];
     res.json({ success: true, number, remaining: GENESIS_MAX - number });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
@@ -395,6 +381,7 @@ async function boot() {
   await initFirebase();
   startPriceMonitor();
   scheduleMonthlyMint();
+  scheduleOwedRetry();
   
 const cron = require('node-cron');
 
@@ -402,40 +389,18 @@ cron.schedule('0 9 * * 1', async () => {
   console.log('Running weekly leaderboard rewards...');
   try {
     const db = require('./firebase').getDb();
-    const { sendPush } = require('./fcm');
     const snap = await db.collection('checkins').orderBy('streak', 'desc').limit(3).get();
     if (snap.empty) return;
-    const { mplCore, create } = require('@metaplex-foundation/mpl-core');
-    const { createUmi } = require('@metaplex-foundation/umi-bundle-defaults');
-    const { keypairIdentity, publicKey, generateSigner } = require('@metaplex-foundation/umi');
-    const { fromWeb3JsKeypair } = require('@metaplex-foundation/umi-web3js-adapters');
-    const { Keypair } = require('@solana/web3.js');
-    const _bs58 = require('bs58'); const bs58 = _bs58.default || _bs58;
-    const umi = createUmi(process.env.HELIUS_RPC_URL).use(mplCore());
-    const keypair = Keypair.fromSecretKey(bs58.decode((process.env.MINT_PAYER_PRIVATE_KEY || process.env.TREASURY_PRIVATE_KEY).trim()));
-    umi.use(keypairIdentity(fromWeb3JsKeypair(keypair)));
-    const crowns = ['gold_crown', 'silver_crown', 'bronze_crown'];
-    const ranks = ['Champion', 'Challenger', 'Contender'];
     const week = new Date().toISOString().slice(0, 10);
+    // Ranked by the stored streak field, exactly as before. Each Crown goes through coreRewards: the push is
+    // sent there once it lands, and an unaffordable one is recorded owed (owedRewards/crown_<week>_rank<n>).
+    // The wallet is in every log line now: on 2026-10-05 the failures named only the rank.
     for (let i = 0; i < snap.docs.length; i++) {
-      const user = snap.docs[i].data();
       const walletAddress = snap.docs[i].id;
-      const crown = crowns[i];
-      const rank = ranks[i];
       try {
-        const assetSigner = generateSigner(umi);
-        const uri = `https://seekdaseek.github.io/solwatch/cnft/rewards/${crown}.json`;
-        await create(umi, {
-          asset: assetSigner,
-          name: `SolWatch ${rank} ${week}`.slice(0, 32),
-          uri,
-          owner: publicKey(walletAddress),
-    updateAuthority: publicKey(process.env.TREASURY_WALLET),
-          plugins: [{ type: 'PermanentFreezeDelegate', frozen: false, authority: { type: 'UpdateAuthority' } }],
-        }).sendAndConfirm(umi);
-        if (user.fcmToken) await sendPush(user.fcmToken, 'Weekly Crown!', `You ranked #${i+1} this week and earned the ${rank} Crown!`, { type: 'reward', rank: String(i+1) });
-        console.log(`Crown minted to #${i+1}: ${walletAddress}`);
-      } catch(e) { console.error(`Crown mint failed for rank ${i+1}:`, e.message); }
+        const r = await rewards().mintReward({ type: 'crown', walletAddress, rank: i + 1, week });
+        if (r.minted) console.log(`Crown minted to #${i+1}: ${walletAddress}`);
+      } catch(e) { console.error(`Crown mint failed for rank ${i+1} (${walletAddress}):`, e.message); }
       await new Promise(r => setTimeout(r, 3000));
     }
     console.log('Weekly rewards done');

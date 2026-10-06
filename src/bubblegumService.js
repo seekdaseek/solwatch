@@ -4,7 +4,8 @@ const { keypairIdentity, publicKey } = require('@metaplex-foundation/umi');
 const { fromWeb3JsKeypair } = require('@metaplex-foundation/umi-web3js-adapters');
 const { Keypair, Connection } = require('@solana/web3.js');
 const _bs58 = require('bs58'); const bs58 = _bs58.default || _bs58;
-const { getDb } = require('./firebase');
+const { withBlockhashRetry } = require('./blockhashRetry');
+const getDb = () => deps.getDb();
 
 function truncBytes(s, max = 32) {
   let out = s;
@@ -36,6 +37,9 @@ function getUmi() {
   return umi;
 }
 
+// Seams for tests (test/blockhash.test.js swaps them for mocks; production never touches this object).
+const deps = { getUmi, mintV1, getDb: () => require('./firebase').getDb(), retry: {} };
+
 async function mintDailyCheckinCNFT(walletAddress, streakDay) {
   const db = getDb();
   const today = new Date().toISOString().slice(0, 10);
@@ -51,9 +55,11 @@ async function mintDailyCheckinCNFT(walletAddress, streakDay) {
   const tier = getTier(streakDay);
   const uri = buildMetadataUri(tier, streakDay);
   const name = truncBytes(`SW Day ${streakDay} ${tier}`);
-  const umi = getUmi();
+  const umi = deps.getUmi();
 
-  const { signature } = await mintV1(umi, {
+  // Up to 2 retries, each with a NEW builder and so a fresh blockhash, and only for a failure that proves the
+  // tx never landed (src/blockhashRetry.js). The caller logs the final failure to stderr; retries go to stdout.
+  const { signature } = await withBlockhashRetry(`cNFT mint ${walletAddress} day ${streakDay}`, () => deps.mintV1(umi, {
     leafOwner: publicKey(walletAddress),
     merkleTree: publicKey(MERKLE_TREE),
     metadata: {
@@ -63,7 +69,7 @@ async function mintDailyCheckinCNFT(walletAddress, streakDay) {
       collection: null,
       creators: [{ address: umi.identity.publicKey, verified: false, share: 100 }],
     },
-  }).sendAndConfirm(umi, { confirm: { commitment: 'confirmed' } });
+  }).sendAndConfirm(umi, { confirm: { commitment: 'confirmed' } }), deps.retry);
 
   const txSig = Buffer.from(signature).toString('base64');
   const mintRecord = {
@@ -134,4 +140,4 @@ async function mintMythicSBT(walletAddress, streakDay) {
   return { success: true, figure, streakDay, txSignature: txSig };
 }
 
-module.exports = { mintDailyCheckinCNFT, mintMythicSBT, getUnburnedCNFTCount, markCNFTsBurned, getTier };
+module.exports = { mintDailyCheckinCNFT, mintMythicSBT, getUnburnedCNFTCount, markCNFTsBurned, getTier, _deps: deps };
