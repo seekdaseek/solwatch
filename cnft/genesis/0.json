@@ -1,0 +1,37 @@
+{
+  "name": "SolWatch Genesis #0 Founder",
+  "symbol": "SWGN",
+  "description": "SolWatch Genesis #0, the Founder edition, minted by the developer. Other Genesis badges are sold for 0.1 SOL each, capped at 100. Transferable.",
+  "image": "https://seekdaseek.github.io/solwatch/images/genesis/0.png",
+  "attributes": [
+    {
+      "trait_type": "Tier",
+      "value": "Genesis"
+    },
+    {
+      "trait_type": "Number",
+      "value": 0
+    },
+    {
+      "trait_type": "Edition",
+      "value": "Founder"
+    },
+    {
+      "trait_type": "Transferable",
+      "value": "Yes"
+    },
+    {
+      "trait_type": "App",
+      "value": "SolWatch"
+    }
+  ],
+  "properties": {
+    "files": [
+      {
+        "uri": "https://seekdaseek.github.io/solwatch/images/genesis/0.png",
+        "type": "image/png"
+      }
+    ],
+    "category": "image"
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "name": "SW Mythic — Apollo",
+  "symbol": "SWMY",
+  "description": "SolWatch mythic badge: Apollo. Minted when a wallet's SolWatch check-in streak reaches day 210. Soulbound: created frozen with a permanent freeze delegate, so it cannot be transferred.",
+  "image": "https://seekdaseek.github.io/solwatch/images/mythic/day-210.png",
+  "attributes": [
+    {
+      "trait_type": "Tier",
+      "value": "Mythic"
+    },
+    {
+      "trait_type": "Figure",
+      "value": "Apollo"
+    },
+    {
+      "trait_type": "Streak Day",
+      "value": 210
+    },
+    {
+      "trait_type": "Soulbound",
+      "value": "Yes"
+    },
+    {
+      "trait_type": "App",
+      "value": "SolWatch"
+    }
+  ],
+  "properties": {
+    "files": [
+      {
+        "uri": "https://seekdaseek.github.io/solwatch/images/mythic/day-210.png",
+        "type": "image/png"
+      }
+    ],
+    "category": "image"
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "name": "SolWatch Challenger Crown",
+  "symbol": "SWCR",
+  "description": "SolWatch weekly leaderboard crown, rank 2 (Challenger). Every Monday the three wallets with the highest SolWatch check-in streak each receive a crown: Champion, Challenger, Contender. Transferable.",
+  "image": "https://seekdaseek.github.io/solwatch/images/rewards/silver_crown.png",
+  "attributes": [
+    {
+      "trait_type": "Tier",
+      "value": "Crown"
+    },
+    {
+      "trait_type": "Rank",
+      "value": 2
+    },
+    {
+      "trait_type": "Title",
+      "value": "Challenger"
+    },
+    {
+      "trait_type": "Reward",
+      "value": "Weekly leaderboard"
+    },
+    {
+      "trait_type": "Transferable",
+      "value": "Yes"
+    },
+    {
+      "trait_type": "App",
+      "value": "SolWatch"
+    }
+  ],
+  "properties": {
+    "files": [
+      {
+        "uri": "https://seekdaseek.github.io/solwatch/images/rewards/silver_crown.png",
+        "type": "image/png"
+      }
+    ],
+    "category": "image"
+  }
+}

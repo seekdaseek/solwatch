@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="500" height="500" viewBox="0 0 500 500">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" style="stop-color:#1a1a2e"/>
+      <stop offset="100%" style="stop-color:#0d0d1a"/>
+    </radialGradient>
+    <radialGradient id="gem" cx="40%" cy="35%" r="60%">
+      <stop offset="0%" style="stop-color:#ffffff;stop-opacity:0.9"/>
+      <stop offset="40%" style="stop-color:#C0C0C0;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#7d7d7d;stop-opacity:1"/>
+    </radialGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect width="500" height="500" fill="url(#bg)" rx="40"/>
+  <circle cx="250" cy="220" r="140" fill="none" stroke="#C0C0C0" stroke-width="3" opacity="0.4"/>
+  <circle cx="250" cy="220" r="150" fill="none" stroke="#C0C0C0" stroke-width="1" opacity="0.2"/>
+  <polygon points="135,295 135,165 192,222 250,128 308,222 365,165 365,295"
+    fill="url(#gem)" filter="url(#glow)" opacity="0.95"/>
+  <rect x="128" y="290" width="244" height="34" rx="6" fill="url(#gem)" opacity="0.95"/>
+  <rect x="128" y="290" width="244" height="34" rx="6" fill="#7d7d7d" opacity="0.35"/>
+  <circle cx="135" cy="160" r="11" fill="#C0C0C0"/>
+  <circle cx="250" cy="122" r="13" fill="#C0C0C0"/>
+  <circle cx="365" cy="160" r="11" fill="#C0C0C0"/>
+  <circle cx="190" cy="307" r="7" fill="#ffffff" opacity="0.6"/>
+  <circle cx="250" cy="307" r="8" fill="#ffffff" opacity="0.7"/>
+  <circle cx="310" cy="307" r="7" fill="#ffffff" opacity="0.6"/>
+  <ellipse cx="200" cy="215" rx="22" ry="10" fill="#ffffff" opacity="0.22" transform="rotate(-20 200 215)"/>
+  <text x="250" y="390" font-family="Arial,sans-serif" font-size="22"
+    fill="#C0C0C0" text-anchor="middle" letter-spacing="6" opacity="0.9">SOLWATCH</text>
+  <text x="250" y="440" font-family="Arial,sans-serif" font-size="32" font-weight="bold"
+    fill="#C0C0C0" text-anchor="middle" letter-spacing="4" filter="url(#glow)">CHALLENGER</text>
+  <line x1="150" y1="455" x2="350" y2="455" stroke="#C0C0C0" stroke-width="1" opacity="0.4"/>
+  <text x="250" y="475" font-family="Arial,sans-serif" font-size="13"
+    fill="#ffffff" text-anchor="middle" opacity="0.4">RANK 2 · WEEKLY CROWN</text>
+</svg>

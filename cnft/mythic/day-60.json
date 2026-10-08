@@ -1,0 +1,37 @@
+{
+  "name": "SW Mythic — Achilles",
+  "symbol": "SWMY",
+  "description": "SolWatch mythic badge: Achilles. Minted when a wallet's SolWatch check-in streak reaches day 60. Soulbound: created frozen with a permanent freeze delegate, so it cannot be transferred.",
+  "image": "https://seekdaseek.github.io/solwatch/images/mythic/day-60.png",
+  "attributes": [
+    {
+      "trait_type": "Tier",
+      "value": "Mythic"
+    },
+    {
+      "trait_type": "Figure",
+      "value": "Achilles"
+    },
+    {
+      "trait_type": "Streak Day",
+      "value": 60
+    },
+    {
+      "trait_type": "Soulbound",
+      "value": "Yes"
+    },
+    {
+      "trait_type": "App",
+      "value": "SolWatch"
+    }
+  ],
+  "properties": {
+    "files": [
+      {
+        "uri": "https://seekdaseek.github.io/solwatch/images/mythic/day-60.png",
+        "type": "image/png"
+      }
+    ],
+    "category": "image"
+  }
+}
